@@ -1,8 +1,8 @@
-export type ImageSize = '2048x3584' | '3584x2048'
-
 export type AspectRatio = '9:16' | '16:9'
 
-export type ImageQuality = 'high'
+export type ImageSize = '2048x1152' | '2160x3840'
+
+export type ImageQuality = 'auto' | 'low' | 'medium' | 'high'
 
 export type MessageStatus = 'pending' | 'loading' | 'success' | 'error'
 
@@ -22,6 +22,10 @@ export interface GenerateSettings {
   apiKey: string
   apiBase: string
   aspectRatio: AspectRatio
+  quality: ImageQuality
+  enableComposePrompt: boolean
+  landscapeComposePrompt: string
+  portraitComposePrompt: string
 }
 
 export interface GenerateImageResponse {

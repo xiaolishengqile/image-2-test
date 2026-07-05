@@ -4,11 +4,19 @@ import {
   DEFAULT_API_BASE,
   DEFAULT_ASPECT_RATIO,
   DEFAULT_QUALITY,
-  aspectToSize,
+  QUALITY_OPTIONS,
+  aspectToApiSize,
   formatGenerationMeta,
+  isLandscapeAspect,
+  isLandscapeSizeLabel,
 } from './lib/constants'
+import {
+  DEFAULT_LANDSCAPE_COMPOSE_PROMPT,
+  DEFAULT_PORTRAIT_COMPOSE_PROMPT,
+  buildFinalPrompt,
+} from './lib/prompt'
 import { copyImageToClipboard } from './utils/copyImage'
-import type { AspectRatio, ChatMessage, GenerateSettings } from './types'
+import type { AspectRatio, ChatMessage, GenerateSettings, ImageQuality } from './types'
 
 const STORAGE_KEY = 'image2-settings'
 
@@ -22,19 +30,33 @@ function loadSettings(): GenerateSettings {
         apiBase = apiBase.replace('ai.t8star.cn', 'ai.t8star.org')
       }
       let aspectRatio: AspectRatio = parsed.aspectRatio ?? DEFAULT_ASPECT_RATIO
-      if (!parsed.aspectRatio && parsed.size === '3584x2048') {
+      if (!parsed.aspectRatio && parsed.size === '2048x1152') {
         aspectRatio = '16:9'
       }
       return {
         apiKey: parsed.apiKey ?? '',
         apiBase,
         aspectRatio,
+        quality: parsed.quality ?? DEFAULT_QUALITY,
+        enableComposePrompt: parsed.enableComposePrompt ?? true,
+        landscapeComposePrompt:
+          parsed.landscapeComposePrompt ?? DEFAULT_LANDSCAPE_COMPOSE_PROMPT,
+        portraitComposePrompt:
+          parsed.portraitComposePrompt ?? DEFAULT_PORTRAIT_COMPOSE_PROMPT,
       }
     }
   } catch {
     /* ignore */
   }
-  return { apiKey: '', apiBase: DEFAULT_API_BASE, aspectRatio: DEFAULT_ASPECT_RATIO }
+  return {
+    apiKey: '',
+    apiBase: DEFAULT_API_BASE,
+    aspectRatio: DEFAULT_ASPECT_RATIO,
+    quality: DEFAULT_QUALITY,
+    enableComposePrompt: true,
+    landscapeComposePrompt: DEFAULT_LANDSCAPE_COMPOSE_PROMPT,
+    portraitComposePrompt: DEFAULT_PORTRAIT_COMPOSE_PROMPT,
+  }
 }
 
 function saveSettings(settings: GenerateSettings) {
@@ -52,8 +74,15 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [showSettings, setShowSettings] = useState(() => !loadSettings().apiKey)
   const [copiedId, setCopiedId] = useState<string | null>(null)
+  const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null)
+  const [outputSizes, setOutputSizes] = useState<Record<string, string>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortMap = useRef(new Map<string, AbortController>())
+  const settingsRef = useRef(settings)
+
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
 
   useEffect(() => {
     saveSettings(settings)
@@ -63,46 +92,51 @@ export default function App() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const runGeneration = useCallback(
-    async (message: ChatMessage, apiKey: string, apiBase: string) => {
-      const controller = new AbortController()
-      abortMap.current.set(message.id, controller)
+  useEffect(() => {
+    if (!preview) return
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPreview(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [preview])
 
+  const runGeneration = useCallback(async (message: ChatMessage, apiKey: string, apiBase: string) => {
+    const controller = new AbortController()
+    abortMap.current.set(message.id, controller)
+
+    setMessages((prev) =>
+      prev.map((m) => (m.id === message.id ? { ...m, status: 'loading' as const } : m)),
+    )
+
+    const finalPrompt = buildFinalPrompt(message.prompt, message.aspectRatio, settingsRef.current)
+
+    try {
+      const imageUrl = await generateImage(
+        apiBase,
+        apiKey,
+        finalPrompt,
+        message.size,
+        message.quality,
+        controller.signal,
+      )
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === message.id ? { ...m, status: 'loading' as const } : m,
+          m.id === message.id ? { ...m, status: 'success' as const, imageUrl } : m,
         ),
       )
-
-      try {
-        const imageUrl = await generateImage(
-          apiBase,
-          apiKey,
-          message.prompt,
-          message.size,
-          controller.signal,
-        )
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === message.id
-              ? { ...m, status: 'success' as const, imageUrl }
-              : m,
-          ),
-        )
-      } catch (err) {
-        if (controller.signal.aborted) return
-        const error = err instanceof Error ? err.message : '生成失败'
-        setMessages((prev) =>
-          prev.map((m) =>
-            m.id === message.id ? { ...m, status: 'error' as const, error } : m,
-          ),
-        )
-      } finally {
-        abortMap.current.delete(message.id)
-      }
-    },
-    [],
-  )
+    } catch (err) {
+      if (controller.signal.aborted) return
+      const error = err instanceof Error ? err.message : '生成失败'
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === message.id ? { ...m, status: 'error' as const, error } : m,
+        ),
+      )
+    } finally {
+      abortMap.current.delete(message.id)
+    }
+  }, [])
 
   const handleSend = () => {
     const trimmed = prompt.trim()
@@ -120,8 +154,8 @@ export default function App() {
       id: createId(),
       prompt: trimmed,
       aspectRatio: settings.aspectRatio,
-      size: aspectToSize(settings.aspectRatio),
-      quality: DEFAULT_QUALITY,
+      size: aspectToApiSize(settings.aspectRatio),
+      quality: settings.quality,
       status: 'pending',
       createdAt: Date.now(),
     }
@@ -165,6 +199,7 @@ export default function App() {
     abortMap.current.forEach((c) => c.abort())
     abortMap.current.clear()
     setMessages([])
+    setOutputSizes({})
   }
 
   const handleCopy = async (id: string, imageUrl: string) => {
@@ -240,6 +275,60 @@ export default function App() {
             />
             <small>浏览器直连中转站，无需额外代理</small>
           </label>
+
+          <div className="settings-panel-title">构图提示词（自动拼接到每次请求）</div>
+          <label className="field checkbox-field">
+            <input
+              type="checkbox"
+              checked={settings.enableComposePrompt}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, enableComposePrompt: e.target.checked }))
+              }
+            />
+            <span>启用默认构图提示词</span>
+          </label>
+
+          <label className="field">
+            <span>横屏 16:9 构图提示</span>
+            <textarea
+              className="compose-textarea"
+              value={settings.landscapeComposePrompt}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, landscapeComposePrompt: e.target.value }))
+              }
+              rows={3}
+              disabled={!settings.enableComposePrompt}
+            />
+          </label>
+
+          <label className="field">
+            <span>竖屏 9:16 构图提示</span>
+            <textarea
+              className="compose-textarea"
+              value={settings.portraitComposePrompt}
+              onChange={(e) =>
+                setSettings((s) => ({ ...s, portraitComposePrompt: e.target.value }))
+              }
+              rows={3}
+              disabled={!settings.enableComposePrompt}
+            />
+          </label>
+
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() =>
+                setSettings((s) => ({
+                  ...s,
+                  landscapeComposePrompt: DEFAULT_LANDSCAPE_COMPOSE_PROMPT,
+                  portraitComposePrompt: DEFAULT_PORTRAIT_COMPOSE_PROMPT,
+                }))
+              }
+            >
+              恢复默认构图提示
+            </button>
+          </div>
         </section>
       )}
 
@@ -257,9 +346,7 @@ export default function App() {
             <article key={msg.id} className="message-group">
               <div className="bubble user-bubble">
                 <p>{msg.prompt}</p>
-                <span className="meta">
-                  {formatGenerationMeta(msg.aspectRatio)}
-                </span>
+                <span className="meta">{formatGenerationMeta(msg.aspectRatio, msg.quality)}</span>
               </div>
 
               <div className="bubble ai-bubble">
@@ -283,8 +370,39 @@ export default function App() {
                 )}
 
                 {msg.status === 'success' && msg.imageUrl && (
-                  <div className="image-result">
-                    <img src={msg.imageUrl} alt={msg.prompt} />
+                  <div className={`image-result${isLandscapeAspect(msg.aspectRatio) ? ' landscape' : ' portrait'}`}>
+                    <button
+                      type="button"
+                      className="image-preview-trigger"
+                      onClick={() => setPreview({ src: msg.imageUrl!, alt: msg.prompt })}
+                      aria-label="放大查看图片"
+                    >
+                      <img
+                        src={msg.imageUrl}
+                        alt={msg.prompt}
+                        onLoad={(e) => {
+                          const img = e.currentTarget
+                          setOutputSizes((prev) => ({
+                            ...prev,
+                            [msg.id]: `${img.naturalWidth}×${img.naturalHeight}`,
+                          }))
+                        }}
+                      />
+                      <span className="image-preview-hint">点击放大</span>
+                    </button>
+                    {outputSizes[msg.id] && (
+                      <p className="output-size">
+                        实际输出：{outputSizes[msg.id]}
+                        {isLandscapeAspect(msg.aspectRatio) &&
+                          !isLandscapeSizeLabel(outputSizes[msg.id]) && (
+                            <span className="output-size-warn">（比例不符，可重试或加强横屏构图提示）</span>
+                          )}
+                        {!isLandscapeAspect(msg.aspectRatio) &&
+                          isLandscapeSizeLabel(outputSizes[msg.id]) && (
+                            <span className="output-size-warn">（比例不符，可重试或加强竖屏构图提示）</span>
+                          )}
+                      </p>
+                    )}
                     <div className="image-actions">
                       <a href={msg.imageUrl} download={`image-${msg.id}.png`}>
                         下载
@@ -323,7 +441,21 @@ export default function App() {
           >
             16:9
           </button>
-          <span className="toolbar-hint">2K · {aspectToSize(settings.aspectRatio)}</span>
+          <span className="toolbar-label">质量</span>
+          <select
+            className="toolbar-select"
+            value={settings.quality}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, quality: e.target.value as ImageQuality }))
+            }
+          >
+            {QUALITY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <span className="toolbar-hint">{aspectToApiSize(settings.aspectRatio)}</span>
         </div>
         <div className="input-row">
           <textarea
@@ -338,6 +470,26 @@ export default function App() {
           </button>
         </div>
       </footer>
+
+      {preview && (
+        <div
+          className="lightbox"
+          role="dialog"
+          aria-modal="true"
+          aria-label="图片预览"
+          onClick={() => setPreview(null)}
+        >
+          <button type="button" className="lightbox-close" onClick={() => setPreview(null)} aria-label="关闭">
+            ×
+          </button>
+          <img
+            className="lightbox-image"
+            src={preview.src}
+            alt={preview.alt}
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   )
 }
