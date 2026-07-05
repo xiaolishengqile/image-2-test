@@ -1,6 +1,7 @@
 import type { GenerateImageResponse, ImageQuality, ImageSize } from '../types'
 
-const API_BASE = '/api/v1/images/generations'
+const apiBase = (import.meta.env.VITE_API_BASE || '/api').replace(/\/$/, '')
+const API_BASE = `${apiBase}/v1/images/generations`
 
 export async function generateImage(
   apiKey: string,
