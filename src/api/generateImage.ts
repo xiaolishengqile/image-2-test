@@ -25,7 +25,16 @@ export async function generateImage(
     signal,
   })
 
-  const data = (await response.json()) as GenerateImageResponse
+  const text = await response.text()
+
+  let data: GenerateImageResponse
+  try {
+    data = JSON.parse(text) as GenerateImageResponse
+  } catch {
+    throw new Error(
+      text.slice(0, 120) || `请求失败 (${response.status})，响应不是 JSON`,
+    )
+  }
 
   if (!response.ok) {
     throw new Error(data.error?.message || `请求失败 (${response.status})`)
