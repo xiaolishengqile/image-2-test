@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateImage } from './api/generateImage'
+import { DEFAULT_API_BASE } from './lib/constants'
 import { copyImageToClipboard } from './utils/copyImage'
 import type { ChatMessage, GenerateSettings, ImageQuality, ImageSize } from './types'
 
@@ -26,11 +27,23 @@ const QUALITY_OPTIONS: { value: ImageQuality; label: string }[] = [
 function loadSettings(): GenerateSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as GenerateSettings
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<GenerateSettings>
+      let apiBase = parsed.apiBase ?? DEFAULT_API_BASE
+      if (apiBase.includes('ai.t8star.cn')) {
+        apiBase = apiBase.replace('ai.t8star.cn', 'ai.t8star.org')
+      }
+      return {
+        apiKey: parsed.apiKey ?? '',
+        apiBase,
+        size: parsed.size ?? '1024x1024',
+        quality: parsed.quality ?? 'auto',
+      }
+    }
   } catch {
     /* ignore */
   }
-  return { apiKey: '', size: '1024x1024', quality: 'auto' }
+  return { apiKey: '', apiBase: DEFAULT_API_BASE, size: '1024x1024', quality: 'auto' }
 }
 
 function saveSettings(settings: GenerateSettings) {
@@ -46,7 +59,7 @@ export default function App() {
   const [showKey, setShowKey] = useState(false)
   const [prompt, setPrompt] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
-  const [showSettings, setShowSettings] = useState(false)
+  const [showSettings, setShowSettings] = useState(() => !loadSettings().apiKey)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortMap = useRef(new Map<string, AbortController>())
@@ -60,7 +73,7 @@ export default function App() {
   }, [messages])
 
   const runGeneration = useCallback(
-    async (message: ChatMessage, apiKey: string) => {
+    async (message: ChatMessage, apiKey: string, apiBase: string) => {
       const controller = new AbortController()
       abortMap.current.set(message.id, controller)
 
@@ -72,6 +85,7 @@ export default function App() {
 
       try {
         const imageUrl = await generateImage(
+          apiBase,
           apiKey,
           message.prompt,
           message.size,
@@ -104,7 +118,10 @@ export default function App() {
     const trimmed = prompt.trim()
     if (!trimmed) return
 
-    if (!settings.apiKey.trim()) {
+    const apiKey = settings.apiKey.trim()
+    const apiBase = settings.apiBase.trim()
+
+    if (!apiKey || !apiBase) {
       setShowSettings(true)
       return
     }
@@ -120,7 +137,7 @@ export default function App() {
 
     setMessages((prev) => [...prev, message])
     setPrompt('')
-    void runGeneration(message, settings.apiKey.trim())
+    void runGeneration(message, apiKey, apiBase)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -131,7 +148,9 @@ export default function App() {
   }
 
   const handleRetry = (message: ChatMessage) => {
-    if (!settings.apiKey.trim()) {
+    const apiKey = settings.apiKey.trim()
+    const apiBase = settings.apiBase.trim()
+    if (!apiKey || !apiBase) {
       setShowSettings(true)
       return
     }
@@ -142,7 +161,7 @@ export default function App() {
           : m,
       ),
     )
-    void runGeneration(message, settings.apiKey.trim())
+    void runGeneration(message, apiKey, apiBase)
   }
 
   const handleCancel = (id: string) => {
@@ -220,39 +239,16 @@ export default function App() {
             <small>密钥仅保存在浏览器本地，不会上传到任何服务器</small>
           </label>
 
-          <div className="field-row">
-            <label className="field">
-              <span>图片尺寸 / 比例</span>
-              <select
-                value={settings.size}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, size: e.target.value as ImageSize }))
-                }
-              >
-                {SIZE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    [{opt.group}] {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="field">
-              <span>图片质量</span>
-              <select
-                value={settings.quality}
-                onChange={(e) =>
-                  setSettings((s) => ({ ...s, quality: e.target.value as ImageQuality }))
-                }
-              >
-                {QUALITY_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
+          <label className="field">
+            <span>接口地址</span>
+            <input
+              type="url"
+              value={settings.apiBase}
+              onChange={(e) => setSettings((s) => ({ ...s, apiBase: e.target.value }))}
+              placeholder="https://ai.t8star.org"
+            />
+            <small>浏览器直连中转站，无需额外代理</small>
+          </label>
         </section>
       )}
 

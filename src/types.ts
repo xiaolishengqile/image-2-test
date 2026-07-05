@@ -25,6 +25,7 @@ export interface ChatMessage {
 
 export interface GenerateSettings {
   apiKey: string
+  apiBase: string
   size: ImageSize
   quality: ImageQuality
 }
