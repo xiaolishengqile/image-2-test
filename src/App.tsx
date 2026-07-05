@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateImage } from './api/generateImage'
+import { copyImageToClipboard } from './utils/copyImage'
 import type { ChatMessage, GenerateSettings, ImageQuality, ImageSize } from './types'
 
 const STORAGE_KEY = 'image2-settings'
@@ -46,6 +47,7 @@ export default function App() {
   const [prompt, setPrompt] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [showSettings, setShowSettings] = useState(false)
+  const [copiedId, setCopiedId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortMap = useRef(new Map<string, AbortController>())
 
@@ -155,6 +157,16 @@ export default function App() {
     setMessages([])
   }
 
+  const handleCopy = async (id: string, imageUrl: string) => {
+    try {
+      await copyImageToClipboard(imageUrl)
+      setCopiedId(id)
+      setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 2000)
+    } catch {
+      window.alert('复制失败，请尝试右键保存图片')
+    }
+  }
+
   const pendingCount = messages.filter(
     (m) => m.status === 'pending' || m.status === 'loading',
   ).length
@@ -163,14 +175,21 @@ export default function App() {
     <div className="app">
       <header className="header">
         <div className="header-left">
-          <h1>Image-2 生图</h1>
-          <span className="badge">gpt-image-2</span>
+          <div className="logo" aria-hidden>🎨</div>
+          <div className="header-title">
+            <h1>Image-2 生图</h1>
+            <p>gpt-image-2 · 贞贞的AI工坊</p>
+          </div>
         </div>
         <div className="header-actions">
           {pendingCount > 0 && (
             <span className="pending-badge">{pendingCount} 张生成中</span>
           )}
-          <button type="button" className="btn-ghost" onClick={() => setShowSettings((v) => !v)}>
+          <button
+            type="button"
+            className={`btn-ghost${showSettings ? ' active' : ''}`}
+            onClick={() => setShowSettings((v) => !v)}
+          >
             设置
           </button>
           {messages.length > 0 && (
@@ -183,6 +202,7 @@ export default function App() {
 
       {showSettings && (
         <section className="settings-panel">
+          <div className="settings-panel-title">连接设置</div>
           <label className="field">
             <span>API Key</span>
             <div className="key-row">
@@ -239,8 +259,11 @@ export default function App() {
       <main className="chat">
         {messages.length === 0 ? (
           <div className="empty">
-            <p>输入提示词，点击发送开始生图</p>
-            <p className="hint">生成过程中可以继续输入并发送，多张图片会并行生成</p>
+            <div className="empty-icon" aria-hidden>✨</div>
+            <p className="empty-title">开始创作你的图片</p>
+            <p className="hint">
+              在下方输入提示词并发送。生成过程中可以继续输入，多张图片会并行生成。
+            </p>
           </div>
         ) : (
           messages.map((msg) => (
@@ -279,6 +302,13 @@ export default function App() {
                       <a href={msg.imageUrl} download={`image-${msg.id}.png`}>
                         下载
                       </a>
+                      <button
+                        type="button"
+                        className="btn-action"
+                        onClick={() => void handleCopy(msg.id, msg.imageUrl!)}
+                      >
+                        {copiedId === msg.id ? '已复制' : '复制'}
+                      </button>
                     </div>
                   </div>
                 )}
@@ -290,16 +320,48 @@ export default function App() {
       </main>
 
       <footer className="input-area">
-        <textarea
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder="描述你想生成的图片…（Enter 发送，Shift+Enter 换行）"
-          rows={2}
-        />
-        <button type="button" className="btn-send" onClick={handleSend} disabled={!prompt.trim()}>
-          发送
-        </button>
+        <div className="input-toolbar">
+          <span className="toolbar-label">尺寸</span>
+          <select
+            className="toolbar-select"
+            value={settings.size}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, size: e.target.value as ImageSize }))
+            }
+          >
+            {SIZE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+          <span className="toolbar-label">质量</span>
+          <select
+            className="toolbar-select"
+            value={settings.quality}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, quality: e.target.value as ImageQuality }))
+            }
+          >
+            {QUALITY_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="input-row">
+          <textarea
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder="描述你想生成的图片…（Enter 发送，Shift+Enter 换行）"
+            rows={2}
+          />
+          <button type="button" className="btn-send" onClick={handleSend} disabled={!prompt.trim()}>
+            发送
+          </button>
+        </div>
       </footer>
     </div>
   )
