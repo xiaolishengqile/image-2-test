@@ -38,8 +38,3 @@ export function formatGenerationMeta(aspect: AspectRatio, quality: string): stri
 export function isLandscapeAspect(aspect: AspectRatio): boolean {
   return aspect === '16:9'
 }
-
-export function isLandscapeSizeLabel(size: string): boolean {
-  const [w, h] = size.split('x').map(Number)
-  return w > h
-}

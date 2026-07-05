@@ -8,7 +8,6 @@ import {
   aspectToApiSize,
   formatGenerationMeta,
   isLandscapeAspect,
-  isLandscapeSizeLabel,
 } from './lib/constants'
 import {
   DEFAULT_LANDSCAPE_COMPOSE_PROMPT,
@@ -75,7 +74,6 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(() => !loadSettings().apiKey)
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [preview, setPreview] = useState<{ src: string; alt: string } | null>(null)
-  const [outputSizes, setOutputSizes] = useState<Record<string, string>>({})
   const bottomRef = useRef<HTMLDivElement>(null)
   const abortMap = useRef(new Map<string, AbortController>())
   const settingsRef = useRef(settings)
@@ -199,7 +197,6 @@ export default function App() {
     abortMap.current.forEach((c) => c.abort())
     abortMap.current.clear()
     setMessages([])
-    setOutputSizes({})
   }
 
   const handleCopy = async (id: string, imageUrl: string) => {
@@ -377,32 +374,9 @@ export default function App() {
                       onClick={() => setPreview({ src: msg.imageUrl!, alt: msg.prompt })}
                       aria-label="放大查看图片"
                     >
-                      <img
-                        src={msg.imageUrl}
-                        alt={msg.prompt}
-                        onLoad={(e) => {
-                          const img = e.currentTarget
-                          setOutputSizes((prev) => ({
-                            ...prev,
-                            [msg.id]: `${img.naturalWidth}×${img.naturalHeight}`,
-                          }))
-                        }}
-                      />
+                      <img src={msg.imageUrl} alt={msg.prompt} />
                       <span className="image-preview-hint">点击放大</span>
                     </button>
-                    {outputSizes[msg.id] && (
-                      <p className="output-size">
-                        实际输出：{outputSizes[msg.id]}
-                        {isLandscapeAspect(msg.aspectRatio) &&
-                          !isLandscapeSizeLabel(outputSizes[msg.id]) && (
-                            <span className="output-size-warn">（比例不符，可重试或加强横屏构图提示）</span>
-                          )}
-                        {!isLandscapeAspect(msg.aspectRatio) &&
-                          isLandscapeSizeLabel(outputSizes[msg.id]) && (
-                            <span className="output-size-warn">（比例不符，可重试或加强竖屏构图提示）</span>
-                          )}
-                      </p>
-                    )}
                     <div className="image-actions">
                       <a href={msg.imageUrl} download={`image-${msg.id}.png`}>
                         下载

@@ -417,17 +417,6 @@ textarea::placeholder {
   max-height: 170px;
 }
 
-.output-size {
-  margin-top: 8px;
-  font-size: 0.72rem;
-  color: var(--text-muted);
-}
-
-.output-size-warn {
-  color: #d97706;
-  margin-left: 4px;
-}
-
 .image-preview-trigger:hover img {
   opacity: 0.92;
 }
