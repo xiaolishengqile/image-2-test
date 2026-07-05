@@ -421,6 +421,36 @@ textarea::placeholder {
   min-width: 0;
 }
 
+.btn-aspect {
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 500;
+  font-family: inherit;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-aspect:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+
+.btn-aspect.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: #bfdbfe;
+}
+
+.toolbar-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
 .input-row {
   display: flex;
   gap: 10px;

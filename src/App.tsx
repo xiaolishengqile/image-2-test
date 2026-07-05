@@ -1,49 +1,40 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { generateImage } from './api/generateImage'
-import { DEFAULT_API_BASE } from './lib/constants'
+import {
+  DEFAULT_API_BASE,
+  DEFAULT_ASPECT_RATIO,
+  DEFAULT_QUALITY,
+  aspectToSize,
+  formatGenerationMeta,
+} from './lib/constants'
 import { copyImageToClipboard } from './utils/copyImage'
-import type { ChatMessage, GenerateSettings, ImageQuality, ImageSize } from './types'
+import type { AspectRatio, ChatMessage, GenerateSettings } from './types'
 
 const STORAGE_KEY = 'image2-settings'
-
-const SIZE_OPTIONS: { value: ImageSize; label: string; group: string }[] = [
-  { value: 'auto', label: '自动', group: '默认' },
-  { value: '1024x1024', label: '1024×1024 正方形', group: '1K' },
-  { value: '1536x1024', label: '1536×1024 横向', group: '1K' },
-  { value: '1024x1536', label: '1024×1536 竖向', group: '1K' },
-  { value: '2048x2048', label: '2048×2048 正方形', group: '2K' },
-  { value: '2048x1152', label: '2048×1152 横向', group: '2K' },
-  { value: '3840x2160', label: '3840×2160 4K 横向', group: '4K' },
-  { value: '2160x3840', label: '2160×3840 4K 竖向', group: '4K' },
-]
-
-const QUALITY_OPTIONS: { value: ImageQuality; label: string }[] = [
-  { value: 'auto', label: '自动' },
-  { value: 'low', label: '低' },
-  { value: 'medium', label: '中' },
-  { value: 'high', label: '高' },
-]
 
 function loadSettings(): GenerateSettings {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
-      const parsed = JSON.parse(raw) as Partial<GenerateSettings>
+      const parsed = JSON.parse(raw) as Partial<GenerateSettings> & { size?: string }
       let apiBase = parsed.apiBase ?? DEFAULT_API_BASE
       if (apiBase.includes('ai.t8star.cn')) {
         apiBase = apiBase.replace('ai.t8star.cn', 'ai.t8star.org')
       }
+      let aspectRatio: AspectRatio = parsed.aspectRatio ?? DEFAULT_ASPECT_RATIO
+      if (!parsed.aspectRatio && parsed.size === '3584x2048') {
+        aspectRatio = '16:9'
+      }
       return {
         apiKey: parsed.apiKey ?? '',
         apiBase,
-        size: parsed.size ?? '1024x1024',
-        quality: parsed.quality ?? 'auto',
+        aspectRatio,
       }
     }
   } catch {
     /* ignore */
   }
-  return { apiKey: '', apiBase: DEFAULT_API_BASE, size: '1024x1024', quality: 'auto' }
+  return { apiKey: '', apiBase: DEFAULT_API_BASE, aspectRatio: DEFAULT_ASPECT_RATIO }
 }
 
 function saveSettings(settings: GenerateSettings) {
@@ -89,7 +80,6 @@ export default function App() {
           apiKey,
           message.prompt,
           message.size,
-          message.quality,
           controller.signal,
         )
         setMessages((prev) =>
@@ -129,8 +119,9 @@ export default function App() {
     const message: ChatMessage = {
       id: createId(),
       prompt: trimmed,
-      size: settings.size,
-      quality: settings.quality,
+      aspectRatio: settings.aspectRatio,
+      size: aspectToSize(settings.aspectRatio),
+      quality: DEFAULT_QUALITY,
       status: 'pending',
       createdAt: Date.now(),
     }
@@ -267,7 +258,7 @@ export default function App() {
               <div className="bubble user-bubble">
                 <p>{msg.prompt}</p>
                 <span className="meta">
-                  {msg.size} · {msg.quality}
+                  {formatGenerationMeta(msg.aspectRatio)}
                 </span>
               </div>
 
@@ -317,34 +308,22 @@ export default function App() {
 
       <footer className="input-area">
         <div className="input-toolbar">
-          <span className="toolbar-label">尺寸</span>
-          <select
-            className="toolbar-select"
-            value={settings.size}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, size: e.target.value as ImageSize }))
-            }
+          <span className="toolbar-label">比例</span>
+          <button
+            type="button"
+            className={`btn-aspect${settings.aspectRatio === '9:16' ? ' active' : ''}`}
+            onClick={() => setSettings((s) => ({ ...s, aspectRatio: '9:16' }))}
           >
-            {SIZE_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
-          <span className="toolbar-label">质量</span>
-          <select
-            className="toolbar-select"
-            value={settings.quality}
-            onChange={(e) =>
-              setSettings((s) => ({ ...s, quality: e.target.value as ImageQuality }))
-            }
+            9:16
+          </button>
+          <button
+            type="button"
+            className={`btn-aspect${settings.aspectRatio === '16:9' ? ' active' : ''}`}
+            onClick={() => setSettings((s) => ({ ...s, aspectRatio: '16:9' }))}
           >
-            {QUALITY_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </select>
+            16:9
+          </button>
+          <span className="toolbar-hint">2K · {aspectToSize(settings.aspectRatio)}</span>
         </div>
         <div className="input-row">
           <textarea

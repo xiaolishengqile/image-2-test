@@ -1,4 +1,12 @@
-import type { GenerateImageResponse, ImageQuality, ImageSize } from '../types'
+import type { GenerateImageResponse, ImageSize } from '../types'
+
+function pickString(obj: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value === 'string' && value.length > 0) return value
+  }
+  return undefined
+}
 
 function extractErrorMessage(json: unknown): string | undefined {
   if (!json || typeof json !== 'object') return
@@ -15,12 +23,41 @@ function extractErrorMessage(json: unknown): string | undefined {
   }
 }
 
+async function parseImageFromResponse(json: unknown): Promise<string> {
+  if (!json || typeof json !== 'object') {
+    throw new Error('响应体不是 JSON 对象')
+  }
+  const root = json as Record<string, unknown>
+
+  const direct =
+    pickString(root, ['b64_json', 'image_base64']) ??
+    (typeof root.image === 'string' ? root.image : undefined)
+  if (direct) {
+    if (direct.startsWith('data:')) return direct
+    return `data:image/png;base64,${direct}`
+  }
+
+  const dataArr = root.data
+  if (Array.isArray(dataArr) && dataArr.length > 0) {
+    const first = dataArr[0]
+    if (first && typeof first === 'object') {
+      const item = first as Record<string, unknown>
+      if (typeof item.url === 'string') return item.url
+      if (typeof item.b64_json === 'string') {
+        const b64 = item.b64_json
+        return b64.startsWith('data:') ? b64 : `data:image/png;base64,${b64}`
+      }
+    }
+  }
+
+  throw new Error('未返回图片数据')
+}
+
 export async function generateImage(
   baseUrl: string,
   apiKey: string,
   prompt: string,
   size: ImageSize,
-  quality: ImageQuality,
   signal?: AbortSignal,
 ): Promise<string> {
   const base = baseUrl.replace(/\/$/, '')
@@ -36,8 +73,6 @@ export async function generateImage(
       model: 'gpt-image-2',
       prompt,
       size,
-      quality,
-      response_format: 'b64_json',
     }),
     signal,
   })
@@ -55,17 +90,5 @@ export async function generateImage(
     throw new Error(extractErrorMessage(data) || text.slice(0, 400) || `请求失败 (${response.status})`)
   }
 
-  const item = data.data?.[0]
-  if (item?.b64_json) {
-    const raw = item.b64_json.startsWith('data:')
-      ? item.b64_json
-      : `data:image/png;base64,${item.b64_json}`
-    return raw
-  }
-
-  if (item?.url) {
-    return item.url
-  }
-
-  throw new Error('未返回图片数据')
+  return parseImageFromResponse(data)
 }

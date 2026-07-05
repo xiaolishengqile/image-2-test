@@ -1,20 +1,15 @@
-export type ImageSize =
-  | 'auto'
-  | '1024x1024'
-  | '1536x1024'
-  | '1024x1536'
-  | '2048x2048'
-  | '2048x1152'
-  | '3840x2160'
-  | '2160x3840'
+export type ImageSize = '2048x3584' | '3584x2048'
 
-export type ImageQuality = 'auto' | 'low' | 'medium' | 'high'
+export type AspectRatio = '9:16' | '16:9'
+
+export type ImageQuality = 'high'
 
 export type MessageStatus = 'pending' | 'loading' | 'success' | 'error'
 
 export interface ChatMessage {
   id: string
   prompt: string
+  aspectRatio: AspectRatio
   size: ImageSize
   quality: ImageQuality
   status: MessageStatus
@@ -26,8 +21,7 @@ export interface ChatMessage {
 export interface GenerateSettings {
   apiKey: string
   apiBase: string
-  size: ImageSize
-  quality: ImageQuality
+  aspectRatio: AspectRatio
 }
 
 export interface GenerateImageResponse {
