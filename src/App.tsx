@@ -1,0 +1,306 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { generateImage } from './api/generateImage'
+import type { ChatMessage, GenerateSettings, ImageQuality, ImageSize } from './types'
+
+const STORAGE_KEY = 'image2-settings'
+
+const SIZE_OPTIONS: { value: ImageSize; label: string; group: string }[] = [
+  { value: 'auto', label: '自动', group: '默认' },
+  { value: '1024x1024', label: '1024×1024 正方形', group: '1K' },
+  { value: '1536x1024', label: '1536×1024 横向', group: '1K' },
+  { value: '1024x1536', label: '1024×1536 竖向', group: '1K' },
+  { value: '2048x2048', label: '2048×2048 正方形', group: '2K' },
+  { value: '2048x1152', label: '2048×1152 横向', group: '2K' },
+  { value: '3840x2160', label: '3840×2160 4K 横向', group: '4K' },
+  { value: '2160x3840', label: '2160×3840 4K 竖向', group: '4K' },
+]
+
+const QUALITY_OPTIONS: { value: ImageQuality; label: string }[] = [
+  { value: 'auto', label: '自动' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+]
+
+function loadSettings(): GenerateSettings {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    if (raw) return JSON.parse(raw) as GenerateSettings
+  } catch {
+    /* ignore */
+  }
+  return { apiKey: '', size: '1024x1024', quality: 'auto' }
+}
+
+function saveSettings(settings: GenerateSettings) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+}
+
+function createId() {
+  return crypto.randomUUID()
+}
+
+export default function App() {
+  const [settings, setSettings] = useState<GenerateSettings>(loadSettings)
+  const [showKey, setShowKey] = useState(false)
+  const [prompt, setPrompt] = useState('')
+  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [showSettings, setShowSettings] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const abortMap = useRef(new Map<string, AbortController>())
+
+  useEffect(() => {
+    saveSettings(settings)
+  }, [settings])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  const runGeneration = useCallback(
+    async (message: ChatMessage, apiKey: string) => {
+      const controller = new AbortController()
+      abortMap.current.set(message.id, controller)
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === message.id ? { ...m, status: 'loading' as const } : m,
+        ),
+      )
+
+      try {
+        const imageUrl = await generateImage(
+          apiKey,
+          message.prompt,
+          message.size,
+          message.quality,
+          controller.signal,
+        )
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === message.id
+              ? { ...m, status: 'success' as const, imageUrl }
+              : m,
+          ),
+        )
+      } catch (err) {
+        if (controller.signal.aborted) return
+        const error = err instanceof Error ? err.message : '生成失败'
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === message.id ? { ...m, status: 'error' as const, error } : m,
+          ),
+        )
+      } finally {
+        abortMap.current.delete(message.id)
+      }
+    },
+    [],
+  )
+
+  const handleSend = () => {
+    const trimmed = prompt.trim()
+    if (!trimmed) return
+
+    if (!settings.apiKey.trim()) {
+      setShowSettings(true)
+      return
+    }
+
+    const message: ChatMessage = {
+      id: createId(),
+      prompt: trimmed,
+      size: settings.size,
+      quality: settings.quality,
+      status: 'pending',
+      createdAt: Date.now(),
+    }
+
+    setMessages((prev) => [...prev, message])
+    setPrompt('')
+    void runGeneration(message, settings.apiKey.trim())
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
+  }
+
+  const handleRetry = (message: ChatMessage) => {
+    if (!settings.apiKey.trim()) {
+      setShowSettings(true)
+      return
+    }
+    setMessages((prev) =>
+      prev.map((m) =>
+        m.id === message.id
+          ? { ...m, status: 'pending' as const, error: undefined, imageUrl: undefined }
+          : m,
+      ),
+    )
+    void runGeneration(message, settings.apiKey.trim())
+  }
+
+  const handleCancel = (id: string) => {
+    abortMap.current.get(id)?.abort()
+    abortMap.current.delete(id)
+    setMessages((prev) => prev.filter((m) => m.id !== id))
+  }
+
+  const handleClear = () => {
+    abortMap.current.forEach((c) => c.abort())
+    abortMap.current.clear()
+    setMessages([])
+  }
+
+  const pendingCount = messages.filter(
+    (m) => m.status === 'pending' || m.status === 'loading',
+  ).length
+
+  return (
+    <div className="app">
+      <header className="header">
+        <div className="header-left">
+          <h1>Image-2 生图</h1>
+          <span className="badge">gpt-image-2</span>
+        </div>
+        <div className="header-actions">
+          {pendingCount > 0 && (
+            <span className="pending-badge">{pendingCount} 张生成中</span>
+          )}
+          <button type="button" className="btn-ghost" onClick={() => setShowSettings((v) => !v)}>
+            设置
+          </button>
+          {messages.length > 0 && (
+            <button type="button" className="btn-ghost" onClick={handleClear}>
+              清空
+            </button>
+          )}
+        </div>
+      </header>
+
+      {showSettings && (
+        <section className="settings-panel">
+          <label className="field">
+            <span>API Key</span>
+            <div className="key-row">
+              <input
+                type={showKey ? 'text' : 'password'}
+                value={settings.apiKey}
+                onChange={(e) => setSettings((s) => ({ ...s, apiKey: e.target.value }))}
+                placeholder="sk-..."
+                autoComplete="off"
+              />
+              <button type="button" className="btn-ghost" onClick={() => setShowKey((v) => !v)}>
+                {showKey ? '隐藏' : '显示'}
+              </button>
+            </div>
+            <small>密钥仅保存在浏览器本地，不会上传到任何服务器</small>
+          </label>
+
+          <div className="field-row">
+            <label className="field">
+              <span>图片尺寸 / 比例</span>
+              <select
+                value={settings.size}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, size: e.target.value as ImageSize }))
+                }
+              >
+                {SIZE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    [{opt.group}] {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="field">
+              <span>图片质量</span>
+              <select
+                value={settings.quality}
+                onChange={(e) =>
+                  setSettings((s) => ({ ...s, quality: e.target.value as ImageQuality }))
+                }
+              >
+                {QUALITY_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </section>
+      )}
+
+      <main className="chat">
+        {messages.length === 0 ? (
+          <div className="empty">
+            <p>输入提示词，点击发送开始生图</p>
+            <p className="hint">生成过程中可以继续输入并发送，多张图片会并行生成</p>
+          </div>
+        ) : (
+          messages.map((msg) => (
+            <article key={msg.id} className="message-group">
+              <div className="bubble user-bubble">
+                <p>{msg.prompt}</p>
+                <span className="meta">
+                  {msg.size} · {msg.quality}
+                </span>
+              </div>
+
+              <div className="bubble ai-bubble">
+                {(msg.status === 'pending' || msg.status === 'loading') && (
+                  <div className="loading">
+                    <div className="spinner" />
+                    <span>{msg.status === 'pending' ? '排队中…' : '生成中…'}</span>
+                    <button type="button" className="btn-ghost btn-sm" onClick={() => handleCancel(msg.id)}>
+                      取消
+                    </button>
+                  </div>
+                )}
+
+                {msg.status === 'error' && (
+                  <div className="error">
+                    <p>{msg.error}</p>
+                    <button type="button" className="btn-ghost btn-sm" onClick={() => handleRetry(msg)}>
+                      重试
+                    </button>
+                  </div>
+                )}
+
+                {msg.status === 'success' && msg.imageUrl && (
+                  <div className="image-result">
+                    <img src={msg.imageUrl} alt={msg.prompt} />
+                    <div className="image-actions">
+                      <a href={msg.imageUrl} download={`image-${msg.id}.png`}>
+                        下载
+                      </a>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </article>
+          ))
+        )}
+        <div ref={bottomRef} />
+      </main>
+
+      <footer className="input-area">
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="描述你想生成的图片…（Enter 发送，Shift+Enter 换行）"
+          rows={2}
+        />
+        <button type="button" className="btn-send" onClick={handleSend} disabled={!prompt.trim()}>
+          发送
+        </button>
+      </footer>
+    </div>
+  )
+}
